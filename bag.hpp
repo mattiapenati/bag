@@ -37,13 +37,16 @@
 #define BAG_DEFAULT_TYPE double
 #endif // BAG_DEFAULT_TYPE
 
+// excludes the cmath header
+// #define BAG_DONT_USE_CMATH
+
 // ===========================================================================
 // Macro
 // ===========================================================================
-#define RETURNS(...)                                                         \
+#define BAG_RETURNS(...)                                                     \
   -> decltype(__VA_ARGS__) { return(__VA_ARGS__); }                          \
 /**/
-#define RETURNS_IF(Condition, ...)                                           \
+#define BAG_RETURNS_IF(Condition, ...)                                       \
   -> typename util::enable_if<Condition,decltype(__VA_ARGS__)>::type         \
   { return(__VA_ARGS__); }                                                   \
 /**/
@@ -114,12 +117,12 @@ namespace util {
   template <class T> struct add_const          { typedef T const type; };
   template <class T> struct add_const<T const> { typedef T const type; };
 
-  // forward
+  // fwd
   template <class T>
-  constexpr inline T && forward(typename remove_ref<T>::type & f)
+  constexpr inline T && fwd(typename remove_ref<T>::type & f)
     { return(static_cast<T &&>(f)); }
   template <class T>
-  constexpr inline T && forward(typename remove_ref<T>::type && f)
+  constexpr inline T && fwd(typename remove_ref<T>::type && f)
     { return(static_cast<T &&>(f)); }
 
   // move
@@ -143,16 +146,15 @@ namespace util {
 
   // forward declaration
   template <class... Types> struct tuple;
+  template <class Tuple> struct tuple_size;
+  template <int I, class Tuple> struct tuple_element;
 
   // tuple size
-  template <class Tuple>
-  struct tuple_size;
   template <class... Types>
-  struct tuple_size< tuple<Types...> >
-    { static constexpr auto value = sizeof...(Types); };
+    struct tuple_size< tuple<Types...> >
+      { static constexpr auto value = sizeof...(Types); };
 
   // tuple_element
-  template <int I, class Tuple> struct tuple_element;
   template <class First, class... Tail>
   struct tuple_element<0, tuple<First,Tail...> >
     { typedef First type; };
@@ -170,7 +172,7 @@ namespace util {
 
     template <class U>
     constexpr inline explicit tuple_leaf__(U && x)
-      : value(forward<U>(x)) {}
+      : value(fwd<U>(x)) {}
 
     // extracts value
     inline T & get() { return(value); }
@@ -178,7 +180,7 @@ namespace util {
   };
 
   // tuple indices
-  template <int... > struct tuple_indices__ {};
+  template <int...> struct tuple_indices__ {};
 
   // make tuple indices
   template <int N, class = tuple_indices__<> >
@@ -187,9 +189,8 @@ namespace util {
   struct make_tuple_indices__<N, tuple_indices__<I...> >
     : make_tuple_indices__<N-1, tuple_indices__<N-1,I...> > {};
   template <int... I>
-  struct make_tuple_indices__<0, tuple_indices__<I...> > {
-    typedef tuple_indices__<I...> type;
-  };
+  struct make_tuple_indices__<0, tuple_indices__<I...> >
+    { typedef tuple_indices__<I...> type; };
 
   // implementation
   template <class Indices, class... Types> struct tuple_impl__;
@@ -198,12 +199,10 @@ namespace util {
   struct tuple_impl__<tuple_indices__<I...>, T...>
     : tuple_leaf__<I,T>...
   {
-    typedef tuple_indices__<I...> indices__;
-
     // constructors
     template <class... U>
     constexpr inline explicit tuple_impl__(U &&... args)
-      : tuple_leaf__<I,T>(forward<U>(args))... {}
+      : tuple_leaf__<I,T>(fwd<U>(args))... {}
   };
 
   // retrieves the Jth element of a tuple
@@ -240,30 +239,35 @@ namespace util {
 
     template <class... Args>
     constexpr inline tuple(Args &&... args)
-      : base__(forward<Args>(args)...) {}
+      : base__(fwd<Args>(args)...) {}
   };
 
   // make_tuple
   template <class... Args>
   constexpr inline auto make_tuple(Args &&... args)
-    RETURNS(tuple<typename decay<Args>::type...>(forward<Args>(args)...))
+    BAG_RETURNS(tuple<typename decay<Args>::type...>(fwd<Args>(args)...))
 
-  // forward_as_tuple
+  // fwd_as_tuple
   template <class... Args>
-  constexpr inline auto forward_as_tuple(Args &&... args)
-    RETURNS(tuple<Args &&...>(forward<Args>(args)...))
+  constexpr inline auto fwd_as_tuple(Args &&... args)
+    BAG_RETURNS(tuple<Args &&...>(fwd<Args>(args)...))
 
   // apply_to_tuple
   template <class Function, class Tuple, int... I>
   constexpr inline auto apply_to_tuple_impl__(Function && f,
                                               Tuple && args,
                                               tuple_indices__<I...>)
-    RETURNS(forward<Function>(f)(get<I>(forward<Tuple>(args))...))
+    BAG_RETURNS(f(get<I>(fwd<Tuple>(args))...))
   template <class Function, class Tuple>
   constexpr inline auto apply_to_tuple(Function && f,
                                        Tuple && args)
-    RETURNS(apply_to_tuple_impl__(forward<Function>(f), forward<Tuple>(args),
-      typename make_tuple_indices__<tuple_size<Tuple>::value>::type()))
+    BAG_RETURNS(
+      apply_to_tuple_impl__(
+        fwd<Function>(f),
+        fwd<Tuple>(args),
+        typename make_tuple_indices__<tuple_size<Tuple>::value>::type()
+      )
+    )
 } // end namespace util
 
 // ===========================================================================
@@ -283,13 +287,13 @@ struct function {
 
   // constructor
   template <class Arg>
-  inline explicit function(Arg && value)
-    : nested(util::forward<Arg>(value)) {}
+  inline constexpr explicit function(Arg && value)
+    : nested(util::fwd<Arg>(value)) {}
 
-  // forwards call to nested object
+  // fwds call to nested object
   template <class... Args>
-  inline auto operator()(Args &&... args) const
-    RETURNS(nested(util::forward<Args>(args)...))
+  inline constexpr auto operator()(Args &&... args)
+    BAG_RETURNS(nested(util::fwd<Args>(args)...))
 };
 
 // checks if is a function class
@@ -318,43 +322,43 @@ struct make_function_type__<T &&>
 template <class T,
           bool = is_function<typename util::decay<T>::type>::value>
 struct make_function__ {
-  static inline auto call(T && t)
-    RETURNS(typename make_function_type__<T &&>::type(util::forward<T>(t)))
+  static inline constexpr auto call(T && t)
+    BAG_RETURNS(typename make_function_type__<T &&>::type(util::fwd<T>(t)))
 };
 
 template <class T>
 struct make_function__<T,true> {
   static inline auto call(T && t)
-    RETURNS(util::forward<T>(t))
+    BAG_RETURNS(util::fwd<T>(t))
 };
 
 // constructs a function from an expression, use this function instead of
 // instantiate function objects
 template <class T>
-inline auto make_function(T && t)
-  RETURNS(make_function__<T>::call(util::forward<T>(t)))
+inline constexpr auto make_function(T && t)
+  BAG_RETURNS(make_function__<T>::call(util::fwd<T>(t)))
 
 // remove the function
 template <class T, class U>
-inline U & remove_function(function<T,U> & f)
+inline constexpr U & remove_function(function<T,U> & f)
   { return(f.nested); }
 template <class T, class U>
-inline U const & remove_function(function<T,U> const & f)
+inline constexpr U const & remove_function(function<T,U> const & f)
   { return(f.nested); }
 template <class T, class U>
-inline auto remove_function(function<T,U> && f)
-  RETURNS(util::forward<U>(f.nested))
+inline constexpr auto remove_function(function<T,U> && f)
+  BAG_RETURNS(util::fwd<U>(f.nested))
 template <class T>
-inline auto remove_function(T && f)
-  RETURNS(util::forward<T>(f))
+inline constexpr auto remove_function(T && f)
+  BAG_RETURNS(util::fwd<T>(f))
 
 // extracts the nth argument from a variadic list of arguments
 namespace util {
   template <int N>
   struct get_nth_args {
     template <class... Args>
-    static inline auto call(Args &&... args)
-      RETURNS(get<N>(forward_as_tuple(forward<Args>(args)...)))
+    static inline constexpr auto call(Args &&... args)
+      BAG_RETURNS(get<N>(fwd_as_tuple(fwd<Args>(args)...)))
   };
 } // end namespace util
 
@@ -365,20 +369,20 @@ struct arg {
 
   // call
   template <class... Args>
-  inline auto operator()(Args &&... args) const
-    RETURNS(util::get_nth_args<N>::call(util::forward<Args>(args)...))
+  inline constexpr auto operator()(Args &&... args) const
+    BAG_RETURNS(util::get_nth_args<N>::call(util::fwd<Args>(args)...))
 };
 
 // constructs an argument from an integer
 template <int N>
-inline auto make_arg()
-  RETURNS(make_function(arg<N>()))
+inline constexpr auto make_arg()
+  BAG_RETURNS(make_function(arg<N>()))
 
 // some usefull placeholders
 namespace placeholders {
-  const auto _x = make_arg<0>();
-  const auto _y = make_arg<1>();
-  const auto _z = make_arg<2>();
+  constexpr auto _x = make_arg<0>();
+  constexpr auto _y = make_arg<1>();
+  constexpr auto _z = make_arg<2>();
 } // end namespace placeholders
 
 // constant function
@@ -389,13 +393,13 @@ struct constant {
 
   // constructors
   template <class Arg>
-  inline constant(Arg && arg)
-    : value(util::forward<Arg>(arg)) {}
+  inline constexpr constant(Arg && arg)
+    : value(util::fwd<Arg>(arg)) {}
 
   // call
   template <class... Args>
-  inline auto operator()(Args &&...) const
-    RETURNS(value)
+  inline constexpr auto operator()(Args &&...)
+    BAG_RETURNS(value)
 };
 
 // checks if a type is a constant function
@@ -404,16 +408,16 @@ template <class T> struct is_constant< constant<T> > : util::true_ {};
 
 // constructs a constant function from a value
 template <class Arg>
-inline auto make_constant(Arg && arg)
-  RETURNS(make_function(constant<typename util::decay<Arg>::type
-                                >(util::forward<Arg>(arg))))
+inline constexpr auto make_constant(Arg && arg)
+  BAG_RETURNS(make_function(constant<typename util::decay<Arg>::type
+                                >(util::fwd<Arg>(arg))))
 
 // some special constants
 #define BAG_SPECIAL_CONSTANT(Name, Value)                                    \
   struct Name {                                                              \
     template <class... Args>                                                 \
     inline auto operator()(Args &&...) const                                 \
-      RETURNS(static_cast<BAG_DEFAULT_TYPE>(Value))                          \
+      BAG_RETURNS(static_cast<BAG_DEFAULT_TYPE>(Value))                      \
   };                                                                         \
   template <> struct is_constant<Name> : util::true_ {}                      \
 /**/
@@ -423,22 +427,22 @@ BAG_SPECIAL_CONSTANT(one, 1);
 BAG_SPECIAL_CONSTANT(pi, M_PI);
 
 namespace constants {
-  const auto _0 = make_function(zero());
-  const auto _1 = make_function(one());
-  const auto _pi = make_function(pi());
+  constexpr auto _0 = make_function(zero());
+  constexpr auto _1 = make_function(one());
+  constexpr auto _pi = make_function(pi());
 } // end namespace constants
 
 namespace util {
   template <int I>
-  inline auto make_tuple_indices()
-    RETURNS(typename make_tuple_indices__<I>::type())
+  inline constexpr auto make_tuple_indices()
+    BAG_RETURNS(typename make_tuple_indices__<I>::type())
 
   template <class Function, class Operands, int... I, class... Args>
-  inline auto expression_call(Function const & f,
-                              Operands const & ops,
-                              tuple_indices__<I...> const &,
-                              Args &&... args)
-    RETURNS(f(get<I>(ops)(forward<Args>(args)...)...))
+  inline constexpr auto expression_call(Function const & f,
+                                        Operands const & ops,
+                                        tuple_indices__<I...> const &,
+                                        Args &&... args)
+    BAG_RETURNS(f(get<I>(ops)(fwd<Args>(args)...)...))
 } // end namespace util
 
 // a node of evaluation tree
@@ -451,15 +455,15 @@ struct expression {
 
   // constructors
   template <class... Args>
-  inline expression(Function const & func, Args &&... args)
+  inline constexpr expression(Function const & func, Args &&... args)
     : function(func)
-    , operands(util::forward<Args>(args)...) {}
+    , operands(util::fwd<Args>(args)...) {}
 
   // call
   template <class... Args>
-  inline auto operator()(Args &&... args) const
-    RETURNS(expression_call(function, operands,
-        util::make_tuple_indices<arity>(), util::forward<Args>(args)...))
+  inline constexpr auto operator()(Args &&... args) const
+    BAG_RETURNS(expression_call(function, operands,
+        util::make_tuple_indices<arity>(), util::fwd<Args>(args)...))
 };
 
 // computes the correct type for an expression, choosing also the correct type
@@ -475,121 +479,123 @@ struct make_expression_type__ {
 
 // constructs a raw expression
 template <class Function, class... Operands>
-inline auto make_expression__(Function const & func, Operands &&... ops)
-  RETURNS(typename make_expression_type__<Function,Operands &&...>::type(
-    func, util::forward<Operands>(ops)...))
+inline constexpr auto make_expression__(Function const & func,
+                                        Operands &&... ops)
+  BAG_RETURNS(typename make_expression_type__<Function,Operands &&...>::type(
+    func, util::fwd<Operands>(ops)...))
 
 // an expression is nested inside a function
 template <class Function, class... Operands>
-inline auto make_expression(Function const & func, Operands &&... ops)
-  RETURNS(make_function(make_expression__(
-    func, remove_function(util::forward<Operands>(ops))...)))
+inline constexpr auto make_expression(Function const & func,
+                                      Operands &&... ops)
+  BAG_RETURNS(make_function(make_expression__(
+    func, remove_function(util::fwd<Operands>(ops))...)))
 
 // extracts the Ith operand
 template <int I, class E>
-inline auto operand(E && e)
-  RETURNS(make_function(util::get<I>(
-    remove_function(util::forward<E>(e)).operands))
+inline constexpr auto operand(E && e)
+  BAG_RETURNS(make_function(util::get<I>(
+    remove_function(util::fwd<E>(e)).operands))
   )
 
 #define BAG_DEFINE_CPP_UNARY_OPERATOR(Operator, Name)                        \
   struct Name {                                                              \
     template <class Arg>                                                     \
-    inline auto operator()(Arg && arg) const                                 \
-      RETURNS(Operator util::forward<Arg>(arg))                              \
+    inline constexpr auto operator()(Arg && arg)                             \
+      BAG_RETURNS(Operator util::fwd<Arg>(arg))                              \
   };                                                                         \
   template <class E, class N>                                                \
-  inline auto operator Operator(function<E,N> & f)                           \
-    RETURNS(make_expression(Name(), f))                                      \
+  inline constexpr auto operator Operator(function<E,N> & f)                 \
+    BAG_RETURNS(make_expression(Name(), f))                                  \
   template <class E, class N>                                                \
-  inline auto operator Operator(function<E,N> const & f)                     \
-    RETURNS(make_expression(Name(), f))                                      \
+  inline constexpr auto operator Operator(function<E,N> const & f)           \
+    BAG_RETURNS(make_expression(Name(), f))                                  \
   template <class E, class N>                                                \
-  inline auto operator Operator(function<E,N> && f)                          \
-    RETURNS(make_expression(Name(), util::move(f)))                          \
+  inline constexpr auto operator Operator(function<E,N> && f)                \
+    BAG_RETURNS(make_expression(Name(), util::move(f)))                      \
 /**/
 
 template <class T, bool = is_function<T>::value>
-struct forward_if_function_impl__ {
+struct fwd_if_function_impl__ {
   template <class F>
-  static inline auto call(F && f)
-    RETURNS(util::forward<F>(f))
+  static inline constexpr auto call(F && f)
+    BAG_RETURNS(util::fwd<F>(f))
 };
 
 template <class T>
-struct forward_if_function_impl__<T,false> {
+struct fwd_if_function_impl__<T,false> {
   template <class F>
-  static inline auto call(F && f)
-    RETURNS(make_constant(util::forward<F>(f)))
+  static inline constexpr auto call(F && f)
+    BAG_RETURNS(make_constant(util::fwd<F>(f)))
 };
 
 template <class F>
-inline auto forward_if_function(F && f)
-  RETURNS(forward_if_function_impl__<typename util::decay<F>::type
-                                    >::call(util::forward<F>(f)))
+inline constexpr auto fwd_if_function(F && f)
+  BAG_RETURNS(fwd_if_function_impl__<typename util::decay<F>::type
+                                    >::call(util::fwd<F>(f)))
 
 
 #define BAG_DEFINE_CPP_BINARY_OPERATOR(Operator, Name)                       \
   struct Name {                                                              \
     template <class Arg0, class Arg1>                                        \
-    inline auto operator()(Arg0 && arg0, Arg1 && arg1) const                 \
-      RETURNS(util::forward<Arg0>(arg0) Operator util::forward<Arg1>(arg1))  \
+    inline constexpr auto operator()(Arg0 && arg0, Arg1 && arg1)             \
+      BAG_RETURNS(util::fwd<Arg0>(arg0) Operator util::fwd<Arg1>(arg1))      \
   };                                                                         \
   template <class E, class N, class T>                                       \
-  inline auto operator Operator(function<E,N> & f, T && v)                   \
-    RETURNS(make_expression(Name(), f,                                       \
-      forward_if_function(util::forward<T>(v))))                             \
+  inline constexpr auto operator Operator(function<E,N> & f, T && v)         \
+    BAG_RETURNS(make_expression(Name(), f,                                   \
+      fwd_if_function(util::fwd<T>(v))))                                     \
   template <class E, class N, class T>                                       \
-  inline auto operator Operator(function<E,N> const & f, T && v)             \
-    RETURNS(make_expression(Name(), f,                                       \
-      forward_if_function(util::forward<T>(v))))                             \
+  inline constexpr auto operator Operator(function<E,N> const & f, T && v)   \
+    BAG_RETURNS(make_expression(Name(), f,                                   \
+      fwd_if_function(util::fwd<T>(v))))                                     \
   template <class E, class N, class T>                                       \
-  inline auto operator Operator(function<E,N> && f, T && v)                  \
-    RETURNS(make_expression(Name(), util::move(f),                           \
-      forward_if_function(util::forward<T>(v))))                             \
+  inline constexpr auto operator Operator(function<E,N> && f, T && v)        \
+    BAG_RETURNS(make_expression(Name(), util::move(f),                       \
+      fwd_if_function(util::fwd<T>(v))))                                     \
   template <class T, class E, class N>                                       \
-  inline auto operator Operator(T && v, function<E,N> & f)                   \
-    RETURNS_IF(                                                              \
+  inline constexpr auto operator Operator(T && v, function<E,N> & f)         \
+    BAG_RETURNS_IF(                                                          \
       (!is_function<typename util::decay<T>::type>::value),                  \
-      make_expression(Name(), forward_if_function(util::forward<T>(v)), f))  \
+      make_expression(Name(), fwd_if_function(util::fwd<T>(v)), f))          \
   template <class T, class E, class N>                                       \
-  inline auto operator Operator(T && v, function<E,N> const & f)             \
-    RETURNS_IF(                                                              \
+  inline constexpr auto operator Operator(T && v, function<E,N> const & f)   \
+    BAG_RETURNS_IF(                                                          \
       (!is_function<typename util::decay<T>::type>::value),                  \
-      make_expression(Name(), forward_if_function(util::forward<T>(v)), f))  \
+      make_expression(Name(), fwd_if_function(util::fwd<T>(v)), f))          \
   template <class T, class E, class N>                                       \
-  inline auto operator Operator(T && v, function<E,N> && f)                  \
-    RETURNS_IF(                                                              \
+  inline constexpr auto operator Operator(T && v, function<E,N> && f)        \
+    BAG_RETURNS_IF(                                                          \
       (!is_function<typename util::decay<T>::type>::value),                  \
-      make_expression(Name(), forward_if_function(util::forward<T>(v)),      \
+      make_expression(Name(), fwd_if_function(util::fwd<T>(v)),              \
         util::move(f)))                                                      \
 /**/
 
 #define BAG_DEFINE_FUNCTION(Name, Body)                                      \
   struct BAG_CAT(Name,_t) {                                                  \
     template <class Args>                                                    \
-    static inline auto call(Args && args)                                    \
-      RETURNS Body                                                           \
+    static inline constexpr auto call(Args && args)                          \
+      BAG_RETURNS Body                                                       \
     template <class... Args>                                                 \
-    inline auto operator()(Args &&... args) const                            \
-      RETURNS(call(util::forward_as_tuple(util::forward<Args>(args)...)))    \
+    inline constexpr auto operator()(Args &&... args)                        \
+      BAG_RETURNS(call(util::fwd_as_tuple(util::fwd<Args>(args)...)))        \
   };                                                                         \
   template <class... Args>                                                   \
-  inline auto Name(Args &&... args)                                          \
-    RETURNS(make_expression(BAG_CAT(Name,_t)(),                              \
-      forward_if_function(util::forward<Args>(args))...))                    \
+  inline constexpr auto Name(Args &&... args)                                \
+    BAG_RETURNS(make_expression(BAG_CAT(Name,_t)(),                          \
+      fwd_if_function(util::fwd<Args>(args))...))                            \
 /**/
 
 #define BAG_DEFINE_CMATH_FUNCTION(Name)                                      \
   struct BAG_CAT(Name,_t) {                                                  \
     template <class... Args>                                                 \
-    inline auto operator()(Args &&... args) const                            \
-      RETURNS(std::Name(util::forward<Args>(args)...))                       \
+    inline constexpr auto operator()(Args &&... args)                        \
+      BAG_RETURNS(std::Name(util::fwd<Args>(args)...))                       \
   };                                                                         \
   template <class... Args>                                                   \
-  inline auto Name(Args &&... args)                                          \
-    RETURNS(make_expression(BAG_CAT(Name,_t)(),                              \
-      forward_if_function(util::forward<Args>(args))...))                    \
+  inline constexpr auto Name(Args &&... args)                                \
+    BAG_RETURNS(make_expression(BAG_CAT(Name,_t)(),                          \
+      fwd_if_function(util::fwd<Args>(args))...))                            \
 /**/
 
 // arithmetic
@@ -730,26 +736,26 @@ BAG_DEFINE_FUNCTION(max, (util::max(util::get<0>(args), util::get<1>(args))))
 template <class Expr>
 struct optimization_rule {
   template <class T>
-  static inline auto call(T && t)
-    RETURNS(util::forward<T>(t))
+  static inline constexpr auto call(T && t)
+    BAG_RETURNS(util::fwd<T>(t))
 };
 
 #define BAG_OPTIMIZATION_RULE(Template, Function, Optimized)                 \
   template < BAG_TUPLE_REM(Template) >                                       \
   struct optimization_rule< BAG_TUPLE_REM(Function) > {                      \
     template <class Expr>                                                    \
-    static inline auto call(Expr && expr)                                    \
-      RETURNS(remove_function Optimized)                                     \
+    static inline constexpr auto call(Expr && expr)                          \
+      BAG_RETURNS(remove_function Optimized)                                 \
   };                                                                         \
 /**/
 
 // apply the rules to an expression
 template <class Expr>
-inline auto optimize_expression(Expr && expr)
-  RETURNS(
+inline constexpr auto optimize_expression(Expr && expr)
+  BAG_RETURNS(
     remove_function(
       optimization_rule<typename util::decay<Expr>::type
-                       >::call(util::forward<Expr>(expr))
+                       >::call(util::fwd<Expr>(expr))
     )
   )
 
@@ -757,47 +763,47 @@ inline auto optimize_expression(Expr && expr)
 template <class Expr, class... Previous>
 struct optimization_loop {
   template <class T>
-  static inline auto call(T && t)
-    RETURNS(optimization_loop<
+  static inline constexpr auto call(T && t)
+    BAG_RETURNS(optimization_loop<
       typename util::decay<decltype(optimize_expression(util::declval<T>()))
                           >::type,
-      Expr, Previous...>::call(optimize_expression(util::forward<T>(t)))
+      Expr, Previous...>::call(optimize_expression(util::fwd<T>(t)))
     )
 };
 
 template <class Expr, class... Others>
 struct optimization_loop<Expr, Expr, Others...> {
   template <class T>
-  static inline auto call(T && t)
-    RETURNS(util::forward<T>(t))
+  static inline constexpr auto call(T && t)
+    BAG_RETURNS(util::fwd<T>(t))
 };
 
 template <class T>
-inline auto optimize_impl__(T && t)
-  RETURNS(optimization_loop<typename util::decay<T>::type
-                           >::call(util::forward<T>(t)))
+inline constexpr auto optimize_impl__(T && t)
+  BAG_RETURNS(optimization_loop<typename util::decay<T>::type
+                           >::call(util::fwd<T>(t)))
 
 template <class Function>
-inline auto optimize(Function && f)
-  RETURNS(
+inline constexpr auto optimize(Function && f)
+  BAG_RETURNS(
     make_function(
       optimize_impl__(
-        remove_function( util::forward<Function>(f) )
+        remove_function( util::fwd<Function>(f) )
       )
     )
   )
 
 namespace util {
   // check if all bool constant are true
-  template <bool... Values> struct all__:true_{};
-  template <bool... Values> struct all__<true,Values...>:all__<Values...>{};
-  template <bool... Values> struct all__<false,Values...>:false_{};
+  template <bool... Values> struct all : true_ {};
+  template <bool... Values> struct all<true,Values...> : all<Values...> {};
+  template <bool... Values> struct all<false,Values...> : false_ {};
 
   // check if all operands are constants
   template <class Operands> struct all_constants__;
   template <class... Operands>
   struct all_constants__< tuple<Operands...> >
-    : all__<is_constant<Operands>::value...> {};
+    : all<is_constant<Operands>::value...> {};
 } //end namespace util
 
 // dispatch the rule, depends on the fact that all nested operands are
@@ -807,11 +813,11 @@ template <bool> struct expression_rule_dispatch__;
 template <>
 struct expression_rule_dispatch__<false> {
   template <int... I, class Expr>
-  static inline auto call(util::tuple_indices__<I...>, Expr && expr)
-    RETURNS(
+  static inline constexpr auto call(util::tuple_indices__<I...>, Expr && expr)
+    BAG_RETURNS(
       make_expression(
         expr.function,
-        optimize(operand<I>(util::forward<Expr>(expr)))...
+        optimize(operand<I>(util::fwd<Expr>(expr)))...
       )
     )
 };
@@ -819,10 +825,10 @@ struct expression_rule_dispatch__<false> {
 template <>
 struct expression_rule_dispatch__<true> {
   template <int... I, class Expr>
-  static inline auto call(util::tuple_indices__<I...>, Expr && expr)
-    RETURNS(
+  static inline constexpr auto call(util::tuple_indices__<I...>, Expr && expr)
+    BAG_RETURNS(
       make_constant(
-        expr.function(operand<I>(util::forward<Expr>(expr))()...)
+        expr.function(operand<I>(util::fwd<Expr>(expr))()...)
       )
     )
 };
@@ -833,12 +839,12 @@ struct optimization_rule< expression<Operator, Operands, Nested> > {
   static constexpr int arity = util::tuple_size<Operands>::value;
 
   template <class Expr>
-  static inline auto call(Expr && expr)
-    RETURNS(
+  static inline constexpr auto call(Expr && expr)
+    BAG_RETURNS(
       expression_rule_dispatch__<util::all_constants__<Operands>::value
                                 >::call(
         typename util::make_tuple_indices__<arity>::type(),
-        util::forward<Expr>(expr)
+        util::fwd<Expr>(expr)
       )
     )
 };
@@ -847,12 +853,12 @@ struct optimization_rule< expression<Operator, Operands, Nested> > {
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<plus, util::tuple<zero,T>, E>),
-  (operand<1>(util::forward<Expr>(expr)))
+  (operand<1>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<plus, util::tuple<T,zero>, E>),
-  (operand<0>(util::forward<Expr>(expr)))
+  (operand<0>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class E),
@@ -863,12 +869,12 @@ BAG_OPTIMIZATION_RULE(
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<minus, util::tuple<zero,T>, E>),
-  (-operand<1>(util::forward<Expr>(expr)))
+  (-operand<1>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<minus, util::tuple<T,zero>, E>),
-  (operand<0>(util::forward<Expr>(expr)))
+  (operand<0>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class E),
@@ -895,12 +901,12 @@ BAG_OPTIMIZATION_RULE(
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<times, util::tuple<one,T>, E>),
-  (operand<1>(util::forward<Expr>(expr)))
+  (operand<1>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<times, util::tuple<T,one>, E>),
-  (operand<0>(util::forward<Expr>(expr)))
+  (operand<0>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class E),
@@ -917,7 +923,7 @@ BAG_OPTIMIZATION_RULE(
 BAG_OPTIMIZATION_RULE(
   (class T, class E),
   (expression<divides, util::tuple<T,one>, E>),
-  (operand<0>(util::forward<Expr>(expr)))
+  (operand<0>(util::fwd<Expr>(expr)))
 )
 BAG_OPTIMIZATION_RULE(
   (class E),
@@ -991,21 +997,21 @@ struct variable_indices< arg<N> > {
 
 // implement the derivative, calling the rules
 template <int N, class T>
-inline auto D_impl__(T && t)
-  RETURNS(
+inline constexpr auto D_impl__(T && t)
+  BAG_RETURNS(
     make_function(
       derivative_rule<N,typename util::decay<T>::type
-                     >::call(util::forward<T>(t))
+                     >::call(util::fwd<T>(t))
     )
   )
 
-// forward the function to the implementation
+// fwd the function to the implementation
 template <class Function, class Variable>
-inline auto D(Function && f, Variable && v)
-  RETURNS(
+inline constexpr auto D(Function && f, Variable && v)
+  BAG_RETURNS(
     optimize(
       D_impl__<variable_indices<typename util::decay<Variable>::type>::value>(
-        remove_function(optimize(util::forward<Function>(f)))
+        remove_function(optimize(util::fwd<Function>(f)))
       )
     )
   )
@@ -1014,22 +1020,22 @@ inline auto D(Function && f, Variable && v)
   template <int N>                                                           \
   struct derivative_rule< N, BAG_TUPLE_REM(Function) > {                     \
     template <class Expr>                                                    \
-    static inline auto D(Expr && expr)                                       \
-      RETURNS(D_impl__<N>(remove_function(util::forward<Expr>(expr))))       \
+    static inline constexpr auto D(Expr && expr)                             \
+      BAG_RETURNS(D_impl__<N>(remove_function(util::fwd<Expr>(expr))))       \
     template <class Expr>                                                    \
-    static inline auto call(Expr && expr)                                    \
-      RETURNS(remove_function Derivative)                                    \
+    static inline constexpr auto call(Expr && expr)                          \
+      BAG_RETURNS(remove_function Derivative)                                \
   };                                                                         \
 /**/
 #define BAG_DERIVATIVE_RULE_T(Template, Function, Derivative)                \
   template <int N, BAG_TUPLE_REM(Template) >                                 \
   struct derivative_rule< N, BAG_TUPLE_REM(Function) > {                     \
     template <class Expr>                                                    \
-    static inline auto D(Expr && expr)                                       \
-      RETURNS(D_impl__<N>(remove_function(util::forward<Expr>(expr))))       \
+    static inline constexpr auto D(Expr && expr)                             \
+      BAG_RETURNS(D_impl__<N>(remove_function(util::fwd<Expr>(expr))))       \
     template <class Expr>                                                    \
-    static inline auto call(Expr && expr)                                    \
-      RETURNS(remove_function Derivative)                                    \
+    static inline constexpr auto call(Expr && expr)                          \
+      BAG_RETURNS(remove_function Derivative)                                \
   };                                                                         \
 /**/
 
@@ -1047,34 +1053,44 @@ BAG_DERIVATIVE_RULE((pi), (constants::_0))
 BAG_DERIVATIVE_RULE_T(
   (class L, class E),
   (expression<unary_plus, util::tuple<L>, E>),
-  (+ D(operand<0>(util::forward<Expr>(expr))))
+  (+ D(operand<0>(util::fwd<Expr>(expr))))
 )
 BAG_DERIVATIVE_RULE_T(
   (class L, class E),
   (expression<unary_minus, util::tuple<L>, E>),
-  (- D(operand<0>(util::forward<Expr>(expr))))
+  (- D(operand<0>(util::fwd<Expr>(expr))))
 )
 
 // algebraic
 BAG_DERIVATIVE_RULE_T(
   (class L, class R, class E),
   (expression<plus, util::tuple<L,R>, E>),
-  (D(operand<0>(util::forward<Expr>(expr))) +
-   D(operand<1>(util::forward<Expr>(expr))))
+  (D(operand<0>(util::fwd<Expr>(expr))) +
+   D(operand<1>(util::fwd<Expr>(expr))))
 )
 BAG_DERIVATIVE_RULE_T(
   (class L, class R, class E),
   (expression<minus, util::tuple<L,R>, E>),
-  (D(operand<0>(util::forward<Expr>(expr))) -
-   D(operand<1>(util::forward<Expr>(expr))))
+  (D(operand<0>(util::fwd<Expr>(expr))) -
+   D(operand<1>(util::fwd<Expr>(expr))))
 )
 BAG_DERIVATIVE_RULE_T(
   (class L, class R, class E),
   (expression<times, util::tuple<L,R>, E>),
-  (D(operand<0>(util::forward<Expr>(expr))) * 
-     operand<1>(util::forward<Expr>(expr)) +
-     operand<0>(util::forward<Expr>(expr)) *
-   D(operand<1>(util::forward<Expr>(expr))))
+  (D(operand<0>(util::fwd<Expr>(expr))) * 
+     operand<1>(util::fwd<Expr>(expr)) +
+     operand<0>(util::fwd<Expr>(expr)) *
+   D(operand<1>(util::fwd<Expr>(expr))))
+)
+BAG_DERIVATIVE_RULE_T(
+  (class L, class R, class E),
+  (expression<divides, util::tuple<L,R>, E>),
+  ((D(operand<0>(util::fwd<Expr>(expr))) * 
+      operand<1>(util::fwd<Expr>(expr)) -
+      operand<0>(util::fwd<Expr>(expr)) *
+    D(operand<1>(util::fwd<Expr>(expr)))) /
+   (operand<1>(util::fwd<Expr>(expr)) *
+    operand<1>(util::fwd<Expr>(expr))))
 )
 
 BAG_END_NAMESPACE
